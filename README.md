@@ -18,7 +18,7 @@ A small Flask API for managing support knowledge documents.
 - Flask
 - Flask-SQLAlchemy
 - SQLAlchemy
-- Pytest (for testing)
+- Pytest (for testing).
 
 ## Project Structure
 
