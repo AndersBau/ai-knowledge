@@ -9,6 +9,10 @@ build/
 # environment files
 .env
 .env.local
+.venv/
+__pycache__/
+*.pyc
+local.db
 
 # IDE files
 .idea/
