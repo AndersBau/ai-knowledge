@@ -27,11 +27,14 @@ def ask_question():
         return jsonify({"error": "OpenAI API key not configured."}), 500
 
     client = OpenAI(api_key=api_key)
-    
-    context = f"Document Title: {document.title}"
+
+    context = f"""
+    Document Title: {document.title}
+    Document Content: {document.content}
+"""
 
     response = client.responses.create(
-        model="gpt-4",
+        model="gpt-5.4-mini",
         instructions="Answer the question based on the provided document context.",
         input=f"Context:\n{context}\n\nQuestion:\n{question}"
     )
