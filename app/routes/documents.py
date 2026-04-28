@@ -9,15 +9,18 @@ def create_document():
     data = request.get_json() or {}
 
     title = data.get("title")
+    content = data.get("content")
 
-    if not title:
-        return jsonify({"error": "Title is required."}), 400
-    document = Document(title=title)
+    if not title or not content:
+        return jsonify({"error": "Title and content are required."}), 400
+    
+    document = Document(title=title, content=content)
     db.session.add(document)
     db.session.commit()
     return jsonify({
         "id": document.id,
         "title": document.title,
+        "content": document.content,
         "created_at": document.created_at.isoformat()
         }), 201
 
@@ -29,6 +32,7 @@ def list_documents():
         {
             "id": document.id,
             "title": document.title,
+            "content": document.content,
             "s3_key": document.s3_key,
             "created_at": document.created_at.isoformat()
         } for document in documents
