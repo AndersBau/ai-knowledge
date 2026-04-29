@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from app.extensions import db
-from app.models import Document
+from app.models import Document, DocumentChunk
+from app.utils.text_splitter import split_text
 
 documents_bp = Blueprint("documents", __name__, url_prefix="/documents")
 
@@ -15,12 +16,28 @@ def create_document():
         return jsonify({"error": "Title and content are required."}), 400
     
     document = Document(title=title, content=content)
+
     db.session.add(document)
-    db.session.commit()
+
+    db.session.flush()  # Get document.id before commit
+
+    chunks = split_text(content)
+
+    for index, chunk_content in enumerate(chunks):
+        chunk = DocumentChunk(
+            document_id=document.id,
+            chunk_index=index,
+            content=chunk_content
+        )
+        db.session.add(chunk)
+
+    db.session.commit()   
+
     return jsonify({
         "id": document.id,
         "title": document.title,
-        "content": document.content,
+        "chunk_count": len(chunks),
+        "s3_key": document.s3_key,
         "created_at": document.created_at.isoformat()
         }), 201
 
