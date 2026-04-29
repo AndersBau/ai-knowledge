@@ -12,8 +12,8 @@ A Flask API for storing knowledge documents, splitting them into chunks, and ans
 
 ## Tech Stack
 
-- Python 3
-- Flask
+- Python 3.13
+- Flask 3
 - Flask-SQLAlchemy
 - SQLAlchemy
 - python-dotenv
@@ -41,7 +41,7 @@ A Flask API for storing knowledge documents, splitting them into chunks, and ans
 ├── scripts/
 │   └── init_db.py
 ├── requirements.txt
-└── run.py
+└── run.py                   # Entry point
 ```
 
 ## How It Works
@@ -64,7 +64,17 @@ A Flask API for storing knowledge documents, splitting them into chunks, and ans
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# 4. Create a .env file in the project root (see Environment Variables below)
+
+# 5. Initialize the database (creates tables)
+python scripts/init_db.py
+
+# 6. Start the API
+python run.py
 ```
+
+The server starts at `http://localhost:5000`.
 
 ## Environment Variables
 
@@ -91,14 +101,26 @@ OPENAI_API_KEY=your-openai-api-key
 Create the tables for documents and document chunks:
 
 ```bash
-python scripts/init_db.py
+# Build the image
+docker build -t ai-knowledge .
+
+# Run the container (pass your .env file)
+docker run --env-file .env -p 5000:5000 ai-knowledge
 ```
 
-## Run the API
+## API Reference
 
-```bash
-python run.py
+### Health
+
 ```
+GET /health
+```
+
+Response: `{"status": "ok"}`
+
+---
+
+### Documents
 
 Default base URL:
 
