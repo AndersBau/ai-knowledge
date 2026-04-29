@@ -1,80 +1,68 @@
 # AI Knowledge API
 
-A Flask REST API for storing knowledge documents, splitting them into chunks, and answering questions against a selected document using OpenAI.
+A Flask API for storing knowledge documents, splitting them into chunks, and answering questions against a selected document with OpenAI.
 
 ## Features
 
 - Health check endpoint
 - Document ingestion with `title` and full `content`
-- Automatic word-based chunking on document create
-- Full CRUD for documents (create, list, update title, delete)
+- Automatic document chunking on create
 - SQLAlchemy-backed persistence for documents and chunks
-- Keyword-scored chunk retrieval for question answering
-- Question answering endpoint that sends relevant chunks as context to OpenAI
-- Docker support
+- Question answering endpoint that retrieves relevant chunks and sends them to OpenAI
 
 ## Tech Stack
 
 - Python 3.13
 - Flask 3
 - Flask-SQLAlchemy
+- SQLAlchemy
 - python-dotenv
 - OpenAI Python SDK
-- boto3 (AWS S3 integration)
-- pytest
 
 ## Project Structure
 
 ```text
 .
 ├── app/
-│   ├── __init__.py          # App factory
-│   ├── config.py            # Config loaded from environment
-│   ├── extensions.py        # SQLAlchemy instance
+│   ├── __init__.py
+│   ├── config.py
+│   ├── extensions.py
 │   ├── models/
-│   │   ├── document.py      # Document model
-│   │   └── chunk.py         # DocumentChunk model
+│   │   ├── chunk.py
+│   │   └── document.py
 │   ├── routes/
-│   │   ├── health.py        # GET /health
-│   │   ├── documents.py     # CRUD /documents
-│   │   └── questions.py     # POST /ask
+│   │   ├── documents.py
+│   │   ├── health.py
+│   │   └── questions.py
 │   ├── services/
-│   │   └── retrieval_service.py  # Keyword-scored chunk retrieval
+│   │   └── retrieval_service.py
 │   └── utils/
-│       └── text_splitter.py      # Word-based text chunking
+│       └── text_splitter.py
 ├── scripts/
-│   └── init_db.py           # Creates database tables
-├── Dockerfile
+│   └── init_db.py
 ├── requirements.txt
 └── run.py                   # Entry point
 ```
 
 ## How It Works
 
-1. A document is created via `POST /documents` with a `title` and raw `content`.
-2. The content is split into smaller word-based chunks and stored alongside the document.
-3. `POST /ask` accepts a `document_id` and `question`, scores stored chunks by keyword overlap, and sends the top matches to OpenAI as context.
-4. The response returns the generated answer plus the source chunks used.
+1. A document is created through `POST /documents` with a title and raw content.
+2. The API splits the content into smaller word-based chunks.
+3. Both the document and its chunks are stored in the database.
+4. `POST /ask` retrieves the most relevant chunks for a document and sends that context to OpenAI.
+5. The response returns an answer plus the source chunks used to answer it.
 
-## Local Setup
+## Setup
 
-### Prerequisites
-
-- Python 3.13+
-- An OpenAI API key
-
-### Steps
+1. Create and activate a virtual environment.
+2. Install dependencies.
+3. Add a local `.env` file in the project root.
+4. Initialize the database.
+5. Start the Flask app.
 
 ```bash
-# 1. Clone the repo and navigate to the project root
-cd ai-knowledge
-
-# 2. Create and activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate          # macOS/Linux
-# .venv\Scripts\activate           # Windows
-
-# 3. Install dependencies
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # 4. Create a .env file in the project root (see Environment Variables below)
@@ -90,14 +78,14 @@ The server starts at `http://localhost:5000`.
 
 ## Environment Variables
 
-`run.py` automatically loads a `.env` file from the project root.
+`run.py` loads environment variables from a `.env` file in the repository root.
 
-| Variable | Default | Description |
-|---|---|---|
-| `SECRET_KEY` | `dev-secret-key` | Flask secret key |
-| `FLASK_DEBUG` | `false` | Enable debug mode |
-| `DATABASE_URL` | `sqlite:///app.db` | SQLAlchemy database URL |
-| `OPENAI_API_KEY` | — | **Required** for `POST /ask` |
+Supported settings:
+
+- `SECRET_KEY` default: `dev-secret-key`
+- `FLASK_DEBUG` default: `false`
+- `DATABASE_URL` default: `sqlite:///app.db`
+- `OPENAI_API_KEY` required for `POST /ask`
 
 Example `.env`:
 
@@ -108,7 +96,9 @@ DATABASE_URL=sqlite:///app.db
 OPENAI_API_KEY=your-openai-api-key
 ```
 
-## Running with Docker
+## Initialize the Database
+
+Create the tables for documents and document chunks:
 
 ```bash
 # Build the image
@@ -131,78 +121,6 @@ Response: `{"status": "ok"}`
 ---
 
 ### Documents
-
-#### Create a document
-
-```
-POST /documents
-Content-Type: application/json
-
-{
-  "title": "My Document",
-  "content": "Full text content of the document..."
-}
-```
-
-Response `201`:
-```json
-{
-  "id": 1,
-  "title": "My Document",
-  "chunk_count": 4,
-  "s3_key": null,
-  "created_at": "2026-04-29T12:00:00"
-}
-```
-
-#### List all documents
-
-```
-GET /documents
-```
-
-#### Update document title
-
-```
-PATCH /documents/<id>
-Content-Type: application/json
-
-{ "title": "Updated Title" }
-```
-
-#### Delete a document
-
-```
-DELETE /documents/<id>
-```
-
-Response: `204 No Content`
-
----
-
-### Question Answering
-
-```
-POST /ask
-Content-Type: application/json
-
-{
-  "document_id": 1,
-  "question": "What is the main topic of this document?"
-}
-```
-
-Response `200`:
-```json
-{
-  "answer": "Based on the document...",
-  "sources": [
-    { "chunk_index": 0, "content": "..." },
-    { "chunk_index": 2, "content": "..." }
-  ]
-}
-```
-```
 
 Default base URL:
 
