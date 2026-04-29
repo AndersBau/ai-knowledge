@@ -1,16 +1,14 @@
-# AI Support Knowledge API
+# AI Knowledge API
 
-A small Flask API for managing support knowledge documents.
+A Flask API for storing knowledge documents, splitting them into chunks, and answering questions against a selected document with OpenAI.
 
 ## Features
 
 - Health check endpoint
-- Document CRUD endpoints:
-  - Create document
-  - List documents
-  - Update document title
-  - Delete document
-- SQLAlchemy-backed persistence (SQLite by default)
+- Document ingestion with `title` and full `content`
+- Automatic document chunking on create
+- SQLAlchemy-backed persistence for documents and chunks
+- Question answering endpoint that retrieves relevant chunks and sends them to OpenAI
 
 ## Tech Stack
 
@@ -18,55 +16,79 @@ A small Flask API for managing support knowledge documents.
 - Flask
 - Flask-SQLAlchemy
 - SQLAlchemy
-- Pytest (for testing).
+- python-dotenv
+- OpenAI Python SDK
 
 ## Project Structure
 
 ```text
 .
 ├── app/
+│   ├── __init__.py
 │   ├── config.py
 │   ├── extensions.py
 │   ├── models/
+│   │   ├── chunk.py
 │   │   └── document.py
-│   └── routes/
-│       ├── documents.py
-│       └── health.py
+│   ├── routes/
+│   │   ├── documents.py
+│   │   ├── health.py
+│   │   └── questions.py
+│   ├── services/
+│   │   └── retrieval_service.py
+│   └── utils/
+│       └── text_splitter.py
 ├── scripts/
 │   └── init_db.py
-├── tests/
 ├── requirements.txt
 └── run.py
 ```
 
+## How It Works
+
+1. A document is created through `POST /documents` with a title and raw content.
+2. The API splits the content into smaller word-based chunks.
+3. Both the document and its chunks are stored in the database.
+4. `POST /ask` retrieves the most relevant chunks for a document and sends that context to OpenAI.
+5. The response returns an answer plus the source chunks used to answer it.
+
 ## Setup
 
 1. Create and activate a virtual environment.
-2. Install dependencies:
+2. Install dependencies.
+3. Add a local `.env` file in the project root.
+4. Initialize the database.
+5. Start the Flask app.
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ## Environment Variables
 
-The app reads configuration from environment variables:
+`run.py` loads environment variables from a `.env` file in the repository root.
 
-- `SECRET_KEY` (default: `dev-secret-key`)
-- `FLASK_DEBUG` (default: `false`)
-- `DATABASE_URL` (default: `sqlite:///app.db`)
+Supported settings:
 
-Example:
+- `SECRET_KEY` default: `dev-secret-key`
+- `FLASK_DEBUG` default: `false`
+- `DATABASE_URL` default: `sqlite:///app.db`
+- `OPENAI_API_KEY` required for `POST /ask`
+
+Example `.env`:
 
 ```bash
-export SECRET_KEY="local-dev-secret"
-export FLASK_DEBUG="true"
-export DATABASE_URL="sqlite:///app.db"
+SECRET_KEY=local-dev-secret
+FLASK_DEBUG=true
+DATABASE_URL=sqlite:///app.db
+OPENAI_API_KEY=your-openai-api-key
 ```
 
 ## Initialize the Database
 
-Create database tables:
+Create the tables for documents and document chunks:
 
 ```bash
 python scripts/init_db.py
@@ -78,61 +100,121 @@ python scripts/init_db.py
 python run.py
 ```
 
-By default, the app runs on:
+Default base URL:
 
 - `http://127.0.0.1:5000`
 
+## Data Model
+
+### `Document`
+
+- `id`
+- `title`
+- `content`
+- `s3_key`
+- `created_at`
+
+### `DocumentChunk`
+
+- `id`
+- `document_id`
+- `chunk_index`
+- `content`
+- `created_at`
+
 ## API Endpoints
 
-### Health
-
-- `GET /health`
-
-Example:
+### `GET /health`
 
 ```bash
 curl http://127.0.0.1:5000/health
 ```
 
-### Documents
+### `POST /documents`
 
-- `POST /documents`
-- `GET /documents`
-- `PATCH /documents/<document_id>`
-- `DELETE /documents/<document_id>`
-
-Create document:
+Creates a document and stores generated chunks.
 
 ```bash
 curl -X POST http://127.0.0.1:5000/documents \
   -H "Content-Type: application/json" \
-  -d '{"title": "How to reset password"}'
+  -d '{
+    "title": "Password reset guide",
+    "content": "Step 1: Go to the sign-in page. Step 2: Click Forgot Password. Step 3: Follow the email instructions."
+  }'
 ```
 
-List documents:
+Example response:
+
+```json
+{
+  "chunk_count": 1,
+  "created_at": "2026-04-28T20:00:00+00:00",
+  "id": 1,
+  "s3_key": null,
+  "title": "Password reset guide"
+}
+```
+
+### `GET /documents`
+
+Returns all documents ordered by newest first.
 
 ```bash
 curl http://127.0.0.1:5000/documents
 ```
 
-Update document title:
+### `PATCH /documents/<document_id>`
+
+Updates only the document title.
 
 ```bash
 curl -X PATCH http://127.0.0.1:5000/documents/1 \
   -H "Content-Type: application/json" \
-  -d '{"title": "Updated support article title"}'
+  -d '{"title": "Updated password reset guide"}'
 ```
 
-Delete document:
+### `DELETE /documents/<document_id>`
+
+Deletes a document and its chunks.
 
 ```bash
 curl -X DELETE http://127.0.0.1:5000/documents/1
 ```
 
-## Run Tests
+### `POST /ask`
 
-If tests are added under `tests/`, run:
+Answers a question using chunks from a single document.
+
+Request body:
+
+- `document_id`
+- `question`
 
 ```bash
-pytest
+curl -X POST http://127.0.0.1:5000/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document_id": 1,
+    "question": "How does a user reset their password?"
+  }'
 ```
+
+Example response:
+
+```json
+{
+  "answer": "The document says the user should go to the sign-in page, click Forgot Password, and follow the email instructions.",
+  "sources": [
+    {
+      "chunk_index": 0,
+      "content": "Step 1: Go to the sign-in page. Step 2: Click Forgot Password. Step 3: Follow the email instructions."
+    }
+  ]
+}
+```
+
+## Notes
+
+- `POST /ask` returns `500` if `OPENAI_API_KEY` is not configured.
+- Chunking is currently word-count based and defaults to 120 words per chunk.
+- Retrieval is currently a simple keyword overlap match over stored chunks.
