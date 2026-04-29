@@ -8,6 +8,14 @@ class Document(db.Model):
   title = db.Column(db.String(255), nullable=False)
   content = db.Column(db.Text, nullable=False)
   s3_key = db.Column(db.String(500), nullable=True)
+
+  chunks = db.relationship(
+    "DocumentChunk", 
+    backref="document", 
+    cascade="all, delete-orphan",
+    lazy=True
+    )
+
   created_at = db.Column(
     db.DateTime,
     nullable=False,

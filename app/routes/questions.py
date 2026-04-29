@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
-from app.models import Document
+from app.services.retrieval_service import retrieve_relevant_chunks
+from app.models import Document, chunk
 from openai import OpenAI
 import os
 
@@ -28,15 +29,31 @@ def ask_question():
 
     client = OpenAI(api_key=api_key)
 
-    context = f"""
-    Document Title: {document.title}
-    Document Content: {document.content}
-"""
+    relevant_chunks = retrieve_relevant_chunks(document_id, question)
+
+    context = "\n\n".join(
+        [
+            f"Chunk {chunk.chunk_index}:\n{chunk.content}"
+            for chunk in relevant_chunks
+        ]
+    )
 
     response = client.responses.create(
         model="gpt-5.4-mini",
-        instructions="Answer the question based on the provided document context.",
-        input=f"Context:\n{context}\n\nQuestion:\n{question}"
+        instructions=(
+            "Answer the question using only the provided context. "
+            "If the answer is not in the context, say you do not know based on the document."
+    ),    
+    input=f"Document Title: {document.title}\n\nContext:\n{context}\n\nQuestion: {question}",
+    max_output_tokens=300
     )
 
-    return jsonify({"answer": response.output_text}), 200
+    return jsonify({
+        "answer": response.output_text,
+        "sources": [
+            {
+                "chunk_index": chunk.chunk_index,
+                "content": chunk.content
+            } for chunk in relevant_chunks
+        ]
+        }), 200
