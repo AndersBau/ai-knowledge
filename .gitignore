@@ -21,5 +21,13 @@ local.db
 # OS files
 .DS_Store
 
+# Terraform
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/*.tfvars
+terraform/*.tfvars.json
+crash.log
+
 # logs
 *.log
