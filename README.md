@@ -7,17 +7,19 @@ A Flask API for storing knowledge documents, splitting them into chunks, and ans
 - Health check endpoint
 - Document ingestion with `title` and full `content`
 - Automatic document chunking on create
-- SQLAlchemy-backed persistence for documents and chunks
-- Question answering endpoint that retrieves relevant chunks and sends them to OpenAI
+- SQLAlchemy-backed persistence for documents and chunks (SQLite for local dev, PostgreSQL for production)
+- Question answering endpoint that retrieves relevant chunks and sends them to OpenAI via the Responses API
 
 ## Tech Stack
 
 - Python 3.13
 - Flask 3
-- Flask-SQLAlchemy
-- SQLAlchemy
+- Flask-SQLAlchemy / SQLAlchemy
+- psycopg2 (PostgreSQL driver)
+- boto3 (AWS S3 integration)
 - python-dotenv
-- OpenAI Python SDK
+- OpenAI Python SDK v2 (Responses API)
+- pytest
 
 ## Project Structure
 
@@ -40,52 +42,57 @@ A Flask API for storing knowledge documents, splitting them into chunks, and ans
 │       └── text_splitter.py
 ├── scripts/
 │   └── init_db.py
+├── terraform/              # AWS infrastructure (EC2, S3, security groups)
 ├── requirements.txt
-└── run.py                   # Entry point
+└── run.py                  # Entry point
 ```
 
 ## How It Works
 
 1. A document is created through `POST /documents` with a title and raw content.
-2. The API splits the content into smaller word-based chunks.
+2. The API splits the content into word-based chunks (120 words each by default).
 3. Both the document and its chunks are stored in the database.
-4. `POST /ask` retrieves the most relevant chunks for a document and sends that context to OpenAI.
-5. The response returns an answer plus the source chunks used to answer it.
+4. `POST /ask` scores stored chunks by keyword overlap with the question, selects the top 3, and sends them as context to OpenAI (`gpt-5.4-mini` via the Responses API).
+5. The response returns an answer plus the source chunks used to generate it.
 
 ## Setup
-
-1. Create and activate a virtual environment.
-2. Install dependencies.
-3. Add a local `.env` file in the project root.
-4. Initialize the database.
-5. Start the Flask app.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 4. Create a .env file in the project root (see Environment Variables below)
+# Create a .env file in the project root (see Environment Variables below)
 
-# 5. Initialize the database (creates tables)
+# Initialize the database (creates tables)
 python scripts/init_db.py
 
-# 6. Start the API
+# Start the API
 python run.py
 ```
 
 The server starts at `http://localhost:5000`.
 
+## Docker
+
+```bash
+# Build the image
+docker build -t ai-knowledge .
+
+# Run the container
+docker run --env-file .env -p 5000:5000 ai-knowledge
+```
+
 ## Environment Variables
 
-`run.py` loads environment variables from a `.env` file in the repository root.
+`run.py` loads environment variables from a `.env` file in the project root.
 
-Supported settings:
-
-- `SECRET_KEY` default: `dev-secret-key`
-- `FLASK_DEBUG` default: `false`
-- `DATABASE_URL` default: `sqlite:///app.db`
-- `OPENAI_API_KEY` required for `POST /ask`
+| Variable        | Default         | Required          |
+|-----------------|-----------------|-------------------|
+| `SECRET_KEY`    | `dev-secret-key`| No                |
+| `FLASK_DEBUG`   | `false`         | No                |
+| `DATABASE_URL`  | `sqlite:///app.db` | No (SQLite is used when unset) |
+| `OPENAI_API_KEY`| —               | Yes, for `POST /ask` |
 
 Example `.env`:
 
@@ -96,55 +103,35 @@ DATABASE_URL=sqlite:///app.db
 OPENAI_API_KEY=your-openai-api-key
 ```
 
-## Initialize the Database
-
-Create the tables for documents and document chunks:
-
-```bash
-# Build the image
-docker build -t ai-knowledge .
-
-# Run the container (pass your .env file)
-docker run --env-file .env -p 5000:5000 ai-knowledge
-```
-
-## API Reference
-
-### Health
-
-```
-GET /health
-```
-
-Response: `{"status": "ok"}`
-
----
-
-### Documents
-
-Default base URL:
-
-- `http://127.0.0.1:5000`
+For PostgreSQL set `DATABASE_URL` to a `postgresql://` connection string; `psycopg2-binary` is included in the dependencies.
 
 ## Data Model
 
 ### `Document`
 
-- `id`
-- `title`
-- `content`
-- `s3_key`
-- `created_at`
+| Column | Type |
+|--------|------|
+| `id` | Integer PK |
+| `title` | String(255) |
+| `content` | Text |
+| `s3_key` | String(500), nullable |
+| `created_at` | DateTime (UTC) |
 
 ### `DocumentChunk`
 
-- `id`
-- `document_id`
-- `chunk_index`
-- `content`
-- `created_at`
+| Column | Type |
+|--------|------|
+| `id` | Integer PK |
+| `document_id` | Integer FK → documents.id |
+| `chunk_index` | Integer |
+| `content` | Text |
+| `created_at` | DateTime (UTC) |
 
-## API Endpoints
+## API Reference
+
+Base URL: `http://127.0.0.1:5000`
+
+---
 
 ### `GET /health`
 
@@ -152,9 +139,16 @@ Default base URL:
 curl http://127.0.0.1:5000/health
 ```
 
+Response `200`:
+```json
+{"status": "ok"}
+```
+
+---
+
 ### `POST /documents`
 
-Creates a document and stores generated chunks.
+Creates a document and its chunks.
 
 ```bash
 curl -X POST http://127.0.0.1:5000/documents \
@@ -165,17 +159,18 @@ curl -X POST http://127.0.0.1:5000/documents \
   }'
 ```
 
-Example response:
-
+Response `201`:
 ```json
 {
-  "chunk_count": 1,
-  "created_at": "2026-04-28T20:00:00+00:00",
   "id": 1,
+  "title": "Password reset guide",
+  "chunk_count": 1,
   "s3_key": null,
-  "title": "Password reset guide"
+  "created_at": "2026-04-28T20:00:00+00:00"
 }
 ```
+
+---
 
 ### `GET /documents`
 
@@ -184,6 +179,21 @@ Returns all documents ordered by newest first.
 ```bash
 curl http://127.0.0.1:5000/documents
 ```
+
+Response `200`:
+```json
+[
+  {
+    "id": 1,
+    "title": "Password reset guide",
+    "content": "Step 1: Go to the sign-in page...",
+    "s3_key": null,
+    "created_at": "2026-04-28T20:00:00+00:00"
+  }
+]
+```
+
+---
 
 ### `PATCH /documents/<document_id>`
 
@@ -195,22 +205,40 @@ curl -X PATCH http://127.0.0.1:5000/documents/1 \
   -d '{"title": "Updated password reset guide"}'
 ```
 
+Response `200`:
+```json
+{
+  "id": 1,
+  "title": "Updated password reset guide",
+  "s3_key": null,
+  "created_at": "2026-04-28T20:00:00+00:00"
+}
+```
+
+---
+
 ### `DELETE /documents/<document_id>`
 
-Deletes a document and its chunks.
+Deletes a document and all its chunks.
 
 ```bash
 curl -X DELETE http://127.0.0.1:5000/documents/1
 ```
 
+Response `204` — no body.
+
+---
+
 ### `POST /ask`
 
-Answers a question using chunks from a single document.
+Answers a question using the most relevant chunks from a document.
 
 Request body:
 
-- `document_id`
-- `question`
+| Field | Type | Required |
+|-------|------|----------|
+| `document_id` | integer | Yes |
+| `question` | string | Yes |
 
 ```bash
 curl -X POST http://127.0.0.1:5000/ask \
@@ -221,11 +249,10 @@ curl -X POST http://127.0.0.1:5000/ask \
   }'
 ```
 
-Example response:
-
+Response `200`:
 ```json
 {
-  "answer": "The document says the user should go to the sign-in page, click Forgot Password, and follow the email instructions.",
+  "answer": "The user should go to the sign-in page, click Forgot Password, and follow the email instructions.",
   "sources": [
     {
       "chunk_index": 0,
@@ -235,8 +262,11 @@ Example response:
 }
 ```
 
+---
+
 ## Notes
 
+- `POST /ask` uses the OpenAI Responses API (`client.responses.create`) with model `gpt-5.4-mini` and a cap of 300 output tokens.
 - `POST /ask` returns `500` if `OPENAI_API_KEY` is not configured.
-- Chunking is currently word-count based and defaults to 120 words per chunk.
-- Retrieval is currently a simple keyword overlap match over stored chunks.
+- Chunking is word-count based; defaults to 120 words per chunk.
+- Chunk retrieval scores chunks by keyword overlap with the question and returns up to 3 results, falling back to the first 3 chunks if no overlap is found.
